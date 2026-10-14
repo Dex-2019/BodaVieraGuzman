@@ -402,8 +402,10 @@ function mostrar(nombre, celular, codigo, yaEstaba){
   $("rMsg").textContent = yaEstaba ? "Este número de celular ya estaba registrado. Aquí tienes de nuevo tu código QR; preséntalo en la entrada."
                                    : "Tu registro quedó guardado. Guarda este código QR y preséntalo en la entrada.";
   $("rC").textContent = codigo; $("qr").innerHTML = "";
-  if (window.QRCode) new QRCode($("qr"), { text:JSON.stringify({ n:nombre, c:celular, id:codigo }), width:220, height:220, colorDark:"#13244B", colorLight:"#FFFFFF", correctLevel:QRCode.CorrectLevel.M });
   $("res").style.display = "block"; $("res").scrollIntoView({ behavior:"smooth", block:"center" });
+  try {   // texto corto y solo ASCII: el código identifica al invitado en la base de datos
+    new QRCode($("qr"), { text: codigo + "|" + celular.replace(/\D/g,""), width:220, height:220, colorDark:"#13244B", colorLight:"#FFFFFF", correctLevel:QRCode.CorrectLevel.M });
+  } catch (err) { console.error(err); $("qr").textContent = "No se pudo dibujar el QR. Guarda este código: " + codigo; }
   $("desc").onclick = () => { const c = $("qr").querySelector("canvas"), a = document.createElement("a");
     if (!c && !$("qr").querySelector("img")) return;
     a.href = c ? c.toDataURL("image/png") : $("qr").querySelector("img").src; a.download = "QR-boda-Gracia-Nelson-"+codigo+".png"; a.click(); };
@@ -436,4 +438,5 @@ $("formulario").addEventListener("submit", async e => {
 </script>
 </body>
 </html>
+
 
