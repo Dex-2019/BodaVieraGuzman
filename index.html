@@ -303,11 +303,12 @@ footer p:first-child{font:italic 400 2.4rem var(--serif);color:var(--blanco)}
       <p class="aviso" id="aviso" role="status"></p>
     </form>
     <div id="res" aria-live="polite">
-      <h3>¡Listo, <span id="rN"></span>!</h3>
-      <p>Guarda este código QR y preséntalo en la entrada.</p>
+      <h3 id="rT"></h3>
+      <p id="rMsg"></p>
       <div id="qr"></div>
       <p class="cod" id="rC"></p>
       <button class="btn" id="desc" type="button">Descargar mi QR</button>
+      <p style="margin-top:18px"><a href="#registro" id="otro" style="font-size:.95rem">Registrar a otra persona</a></p>
     </div>
   </div>
 </section>
@@ -320,11 +321,11 @@ footer p:first-child{font:italic 400 2.4rem var(--serif);color:var(--blanco)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ========= CONFIGURACIÓN ========= */
 const firebaseConfig = {   // Pega aquí los datos de tu proyecto de Firebase
-   apiKey: "AIzaSyC5KKkMr0FVPstDHXVs5iqbv5OwYQRUt-g",
+ apiKey: "AIzaSyC5KKkMr0FVPstDHXVs5iqbv5OwYQRUt-g",
   authDomain: "bodavieraguzman.firebaseapp.com",
   projectId: "bodavieraguzman",
   storageBucket: "bodavieraguzman.firebasestorage.app",
@@ -393,30 +394,46 @@ new IntersectionObserver((es,ob) => { if (es[0].isIntersecting){ ob.disconnect()
 
 /* Registro de invitados */
 const aviso = (t,err=false) => { $("aviso").textContent = t; $("aviso").className = "aviso"+(err?" error":""); };
-$("formulario").addEventListener("submit", async e => {
-  e.preventDefault();
-  const nombre = $("nombre").value.trim().replace(/\s+/g," "), celular = $("celular").value.trim();
-  if (nombre.length < 5 || !nombre.includes(" ")) return aviso("Escribe tu nombre y apellido.", true);
-  if (celular.replace(/\D/g,"").length < 8) return aviso("Escribe un número de celular válido (mínimo 8 dígitos).", true);
-  const btn = $("enviar"); btn.disabled = true; aviso("Guardando tu registro…");
-  const codigo = "GN-" + Date.now().toString(36).toUpperCase().slice(-5) + Math.random().toString(36).toUpperCase().slice(2,5);
-  let ok = false;
-  try { if (db){ await addDoc(collection(db,"invitados"), { nombre, celular, codigo, creado:serverTimestamp() }); ok = true; } } catch (err) { console.error(err); }
-  try {
-    const r = await fetch("https://formsubmit.co/ajax/"+CORREO, { method:"POST",
-      headers:{ "Content-Type":"application/json", "Accept":"application/json" },
-      body: JSON.stringify({ _subject:"Nuevo invitado: "+nombre, _template:"table", _captcha:"false", Nombre:nombre, Celular:celular, Codigo:codigo }) });
-    if (r.ok) ok = true;
-  } catch (err) { console.error(err); }
-  btn.disabled = false;
-  if (!ok) return aviso("No pudimos guardar tu registro. Revisa tu conexión e inténtalo de nuevo.", true);
-  aviso(""); $("formulario").style.display = "none";
-  $("rN").textContent = nombre.split(" ")[0]; $("rC").textContent = codigo; $("qr").innerHTML = "";
-  new QRCode($("qr"), { text:JSON.stringify({ n:nombre, c:celular, id:codigo }), width:220, height:220, colorDark:"#13244B", colorLight:"#FFFFFF", correctLevel:QRCode.CorrectLevel.M });
+const limite = (p,ms=10000) => Promise.race([p, new Promise((_,rej) => setTimeout(() => rej(new Error("sin respuesta del servidor")), ms))]);
+
+function mostrar(nombre, celular, codigo, yaEstaba){
+  $("formulario").style.display = "none";
+  $("rT").textContent = yaEstaba ? "Ya estás en la lista, " + nombre.split(" ")[0] : "¡Registro enviado, " + nombre.split(" ")[0] + "!";
+  $("rMsg").textContent = yaEstaba ? "Este número de celular ya estaba registrado. Aquí tienes de nuevo tu código QR; preséntalo en la entrada."
+                                   : "Tu registro quedó guardado. Guarda este código QR y preséntalo en la entrada.";
+  $("rC").textContent = codigo; $("qr").innerHTML = "";
+  if (window.QRCode) new QRCode($("qr"), { text:JSON.stringify({ n:nombre, c:celular, id:codigo }), width:220, height:220, colorDark:"#13244B", colorLight:"#FFFFFF", correctLevel:QRCode.CorrectLevel.M });
   $("res").style.display = "block"; $("res").scrollIntoView({ behavior:"smooth", block:"center" });
   $("desc").onclick = () => { const c = $("qr").querySelector("canvas"), a = document.createElement("a");
+    if (!c && !$("qr").querySelector("img")) return;
     a.href = c ? c.toDataURL("image/png") : $("qr").querySelector("img").src; a.download = "QR-boda-Gracia-Nelson-"+codigo+".png"; a.click(); };
+}
+$("otro").addEventListener("click", () => { $("res").style.display = "none"; $("formulario").reset(); $("formulario").style.display = ""; aviso(""); });
+
+$("formulario").addEventListener("submit", async e => {
+  e.preventDefault();
+  const nombre = $("nombre").value.trim().replace(/\s+/g," "), celular = $("celular").value.trim(), id = celular.replace(/\D/g,"");
+  if (nombre.length < 5 || !nombre.includes(" ")) return aviso("Escribe tu nombre y apellido.", true);
+  if (id.length < 8) return aviso("Escribe un número de celular válido (mínimo 8 dígitos).", true);
+  if (!db || firebaseConfig.apiKey === "TU_API_KEY") return aviso("El sitio aún no está conectado a Firebase: falta pegar la configuración del proyecto en index.html.", true);
+
+  const btn = $("enviar"); btn.disabled = true; aviso("Verificando tu registro…");
+  let codigo;
+  try {
+    const ref = doc(db, "invitados", id);               // el celular es el identificador: evita duplicados
+    const previo = await limite(getDoc(ref));
+    if (previo.exists()){ const d = previo.data(); btn.disabled = false; aviso(""); return mostrar(d.nombre, d.celular, d.codigo, true); }
+    codigo = "GN-" + Date.now().toString(36).toUpperCase().slice(-5) + Math.random().toString(36).toUpperCase().slice(2,5);
+    await limite(setDoc(ref, { nombre, celular, codigo, creado:serverTimestamp() }));
+  } catch (err) {
+    console.error(err); btn.disabled = false;
+    return aviso("No pudimos guardar tu registro (" + (err.code || err.message) + "). Inténtalo de nuevo en unos minutos.", true);
+  }
+  fetch("https://formsubmit.co/ajax/"+CORREO, { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json" },
+    body: JSON.stringify({ _subject:"Nuevo invitado: "+nombre, _template:"table", _captcha:"false", Nombre:nombre, Celular:celular, Codigo:codigo }) }).catch(console.error);
+  btn.disabled = false; aviso(""); mostrar(nombre, celular, codigo, false);
 });
 </script>
 </body>
 </html>
+
